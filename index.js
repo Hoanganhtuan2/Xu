@@ -1,35 +1,26 @@
 const express = require('express');
 const axios = require('axios');
 const path = require('path');
-const https = require('https');
+const { HttpsProxyAgent } = require('https-proxy-agent'); // <<< THÊM DÒNG NÀY
 
 const app = express();
-// Render sử dụng biến PORT, nếu chạy local thì mặc định là 3000
 const PORT = process.env.PORT || 3000;
 
-// Middleware để xử lý dữ liệu từ form
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// ===== CONFIGURATION (CẤU HÌNH) =====
-const API_ENDPOINT = 'https://zefoy.com/'; // <<<< THAY API THẬT CỦA BẠN VÀO ĐÂY
+const API_ENDPOINT = 'https://zefoy.com/';
 const PROXY_SOURCES = [
     "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all",
     "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt",
     "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt"
 ];
 
-// ===== FUNCTIONS (CÁC HÀM XỬ LÝ) =====
-
-/**
- * Tải danh sách proxy từ nhiều nguồn.
- * @returns {Promise<string[]>} Mảng các proxy.
- */
 async function loadProxies() {
     console.log('Bắt đầu tải proxy...');
     const promises = PROXY_SOURCES.map(url => axios.get(url, { timeout: 5000 }).catch(err => {
         console.error(`Lỗi khi tải proxy từ ${url}: ${err.message}`);
-        return null; // Bỏ qua nếu lỗi
+        return null;
     }));
 
     const results = await Promise.all(promises);
@@ -43,10 +34,11 @@ async function loadProxies() {
     });
 
     console.log(`Tải thành công ${proxies.length} proxy.`);
-    return [...new Set(proxies)]; // Trả về các proxy duy nhất
+    return [...new Set(proxies)];
 }
 
 
+// ===== SỬA HÀM NÀY =====
 /**
  * Gửi yêu cầu buff đến API.
  * @param {string} link Link video TikTok.
@@ -62,39 +54,33 @@ async function sendBuffRequest(link, type, amount, proxy) {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36'
     };
     
-    // Cấu hình proxy cho Axios
-    let proxyConfig = null;
-    if (proxy) {
-        const [host, port] = proxy.split(':');
-        proxyConfig = {
-            host,
-            port: parseInt(port, 10),
-        };
-    }
+    // Tạo agent cho proxy nếu có
+    const agent = proxy ? new HttpsProxyAgent(`http://${proxy}`) : null;
     
     try {
         const response = await axios.post(API_ENDPOINT, postData, {
             headers,
-            proxy: proxyConfig,
-            timeout: 30000 // Timeout 30 giây
+            httpsAgent: agent, // <<< SỬ DỤNG AGENT TẠI ĐÂY
+            timeout: 30000
         });
-        // Giả lập phản hồi nếu API thật không hoạt động
         return response.data || JSON.stringify({ status: 'success', message: 'Đã gửi yêu cầu đến API (đây là phản hồi giả lập).' });
     } catch (error) {
-        return `Lỗi Axios: ${error.message}`;
+        // Cung cấp thông báo lỗi rõ ràng hơn
+        let errorMessage = `Lỗi Axios: ${error.message}`;
+        if (error.response) {
+            errorMessage += ` | Status: ${error.response.status}`;
+        }
+        return errorMessage;
     }
 }
+// ===== KẾT THÚC SỬA ĐỔI =====
 
 
-// ===== ROUTES (ĐIỀU HƯỚNG WEB) =====
-
-// Route để hiển thị form HTML
+// ===== CÁC PHẦN CÒN LẠI GIỮ NGUYÊN =====
 app.get('/', (req, res) => {
-    // Gửi thẳng file HTML về cho trình duyệt
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Route để xử lý khi người dùng nhấn submit
 app.post('/buff', async (req, res) => {
     try {
         const { link, type, amount } = req.body;
@@ -127,8 +113,6 @@ app.post('/buff', async (req, res) => {
     }
 });
 
-
-// ===== START SERVER (KHỞI CHẠY SERVER) =====
 app.listen(PORT, () => {
     console.log(`🚀 Server đang chạy tại http://localhost:${PORT}`);
 });
